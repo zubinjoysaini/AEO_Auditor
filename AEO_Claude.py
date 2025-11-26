@@ -1,23 +1,72 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Nov 25 12:12:12 2025
-
-@author: zubin
-"""
-
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import re
 import json
-from urllib.parse import urljoin, urlparse
 import textstat
-import os
 
+st.set_page_config(
+    page_title="AEO On-Page Auditor",
+    page_icon="🎯",
+    layout="wide"
+)
 
-app = Flask(__name__)
-CORS(app)
+# Custom CSS
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #4F46E5;
+        margin-bottom: 1rem;
+    }
+    .score-card {
+        padding: 2rem;
+        border-radius: 1rem;
+        text-align: center;
+        margin: 1rem 0;
+    }
+    .score-high {
+        background-color: #D1FAE5;
+        color: #065F46;
+    }
+    .score-medium {
+        background-color: #FEF3C7;
+        color: #92400E;
+    }
+    .score-low {
+        background-color: #FEE2E2;
+        color: #991B1B;
+    }
+    .metric-card {
+        padding: 1rem;
+        background-color: #F9FAFB;
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+    }
+    .priority-high {
+        border-left: 4px solid #DC2626;
+        background-color: #FEF2F2;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        border-radius: 0.5rem;
+    }
+    .priority-medium {
+        border-left: 4px solid #F59E0B;
+        background-color: #FFFBEB;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        border-radius: 0.5rem;
+    }
+    .priority-low {
+        border-left: 4px solid #3B82F6;
+        background-color: #EFF6FF;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        border-radius: 0.5rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 def fetch_page(url):
     """Fetch webpage content"""
@@ -197,7 +246,6 @@ def calculate_score_breakdown(data):
     """Calculate detailed score breakdown by component"""
     breakdown = {}
     
-    # Schema Score (25 points)
     schema_score = 0
     if data['schema']['faq_present']:
         schema_score += 10
@@ -207,15 +255,12 @@ def calculate_score_breakdown(data):
         schema_score += 5
     breakdown['schema'] = {'score': schema_score, 'max': 25}
     
-    # Question Content Score (20 points)
     question_score = min(data['questions']['question_headings'] * 4, 20)
     breakdown['questions'] = {'score': question_score, 'max': 20}
     
-    # Snippet Optimization Score (20 points)
     snippet_score = data['snippet']['snippet_score'] * 0.2
     breakdown['snippet'] = {'score': round(snippet_score, 1), 'max': 20}
     
-    # Structure Score (15 points)
     structure_score = 0
     if data['structure']['has_tldr']:
         structure_score += 5
@@ -225,7 +270,6 @@ def calculate_score_breakdown(data):
         structure_score += 5
     breakdown['structure'] = {'score': structure_score, 'max': 15}
     
-    # E-E-A-T Score (10 points)
     eeat_score = sum([
         data['eeat']['has_author_meta'],
         data['eeat']['has_date'],
@@ -234,7 +278,6 @@ def calculate_score_breakdown(data):
     ]) * 2.5
     breakdown['eeat'] = {'score': eeat_score, 'max': 10}
     
-    # Entity Score (10 points)
     entity_score = 0
     if data['entities']['entities_found'] > 10:
         entity_score = 10
@@ -250,16 +293,16 @@ def calculate_score_breakdown(data):
     }
 
 def calculate_engine_scores(data):
-    """Calculate scores for different AI engines based on their priorities"""
+    """Calculate scores for different AI engines"""
     base_breakdown = calculate_score_breakdown(data)
     
     engines = {
         'ChatGPT': {
             'weights': {
-                'schema': 1.2,      # High priority on structured data
-                'questions': 1.1,   # Important for conversational queries
+                'schema': 1.2,
+                'questions': 1.1,
                 'snippet': 1.0,
-                'structure': 1.3,   # Very high on readability
+                'structure': 1.3,
                 'eeat': 0.9,
                 'entities': 1.0
             },
@@ -268,32 +311,32 @@ def calculate_engine_scores(data):
         'Claude': {
             'weights': {
                 'schema': 1.0,
-                'questions': 1.2,   # High on natural questions
+                'questions': 1.2,
                 'snippet': 1.0,
-                'structure': 1.4,   # Highest on content quality
-                'eeat': 1.3,        # Very high on trustworthiness
+                'structure': 1.4,
+                'eeat': 1.3,
                 'entities': 1.1
             },
             'focus': 'Emphasizes content quality, trustworthiness, and natural language'
         },
         'Gemini': {
             'weights': {
-                'schema': 1.3,      # Very high on structured data
+                'schema': 1.3,
                 'questions': 1.0,
-                'snippet': 1.2,     # High on snippet optimization
+                'snippet': 1.2,
                 'structure': 1.0,
                 'eeat': 1.0,
-                'entities': 1.2     # High on entity recognition
+                'entities': 1.2
             },
             'focus': 'Strong preference for structured data and entities'
         },
         'Perplexity': {
             'weights': {
                 'schema': 1.1,
-                'questions': 1.3,   # Very high on Q&A format
-                'snippet': 1.2,     # High on concise answers
+                'questions': 1.3,
+                'snippet': 1.2,
                 'structure': 1.0,
-                'eeat': 1.2,        # High on source credibility
+                'eeat': 1.2,
                 'entities': 1.0
             },
             'focus': 'Optimized for direct answers and source attribution'
@@ -323,7 +366,6 @@ def generate_prioritized_recommendations(data):
     """Generate recommendations with priority levels"""
     recommendations = []
     
-    # HIGH PRIORITY (Critical for most engines)
     if not data['schema']['faq_present']:
         recommendations.append({
             'priority': 'HIGH',
@@ -351,7 +393,6 @@ def generate_prioritized_recommendations(data):
             'effort': 'Low'
         })
     
-    # MEDIUM PRIORITY (Important but not critical)
     if not data['eeat']['has_author_meta']:
         recommendations.append({
             'priority': 'MEDIUM',
@@ -388,7 +429,6 @@ def generate_prioritized_recommendations(data):
             'effort': 'Medium'
         })
     
-    # LOW PRIORITY (Nice to have)
     if data['structure']['avg_para_length'] > 100:
         recommendations.append({
             'priority': 'LOW',
@@ -407,121 +447,164 @@ def generate_prioritized_recommendations(data):
             'effort': 'High'
         })
     
-    if not data['eeat']['has_sources']:
-        recommendations.append({
-            'priority': 'LOW',
-            'category': 'E-E-A-T',
-            'action': 'Add references and citations to external sources',
-            'impact': 'Strengthens credibility and fact-checking',
-            'effort': 'Medium'
-        })
-    
-    if not data['structure']['has_toc']:
-        recommendations.append({
-            'priority': 'LOW',
-            'category': 'Navigation',
-            'action': 'Add a table of contents for long-form content',
-            'impact': 'Improves content navigation and structure signals',
-            'effort': 'Low'
-        })
-    
-    # Sort by priority
     priority_order = {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}
     recommendations.sort(key=lambda x: priority_order[x['priority']])
     
     return recommendations
 
-@app.route('/api/aeo-analyze', methods=['POST'])
-def analyze():
-    try:
-        data = request.json
-        url = data.get('url')
-        
-        if not url:
-            return jsonify({'error': 'URL is required'}), 400
-        
-        # Fetch page
-        html = fetch_page(url)
-        soup = BeautifulSoup(html, 'html.parser')
-        
-        # Run all analyses
-        schema_data = analyze_schema(soup)
-        question_data = analyze_questions(soup)
-        snippet_data = analyze_snippet_optimization(soup)
-        structure_data = analyze_structure(soup)
-        entity_data = analyze_entities(soup)
-        eeat_data = analyze_eeat(soup, url)
-        
-        # Combine results
-        result = {
-            'url': url,
-            'schema': schema_data,
-            'questions': question_data,
-            'snippet': snippet_data,
-            'structure': structure_data,
-            'entities': entity_data,
-            'eeat': eeat_data
-        }
-        
-        # Calculate scores
-        score_breakdown = calculate_score_breakdown(result)
-        engine_scores = calculate_engine_scores(result)
-        recommendations = generate_prioritized_recommendations(result)
-        
-        # Flatten for frontend compatibility
-        flattened = {
-            'url': url,
-            'aeo_score': score_breakdown['total'],
-            'score_breakdown': score_breakdown['breakdown'],
-            'engine_scores': engine_scores,
-            'faq_schema_present': schema_data['faq_present'],
-            'faq_count': schema_data['faq_count'],
-            'howto_schema_present': schema_data['howto_present'],
-            'howto_count': schema_data['howto_count'],
-            'article_schema_present': schema_data['article_present'],
-            'total_headings': question_data['total_headings'],
-            'question_headings': question_data['question_headings'],
-            'question_heading_examples': question_data['question_heading_examples'],
-            'first_para_words': snippet_data['first_para_words'],
-            'lists': snippet_data['lists'],
-            'tables': snippet_data['tables'],
-            'short_paragraphs': snippet_data['short_paragraphs'],
-            'snippet_score': snippet_data['snippet_score'],
-            'has_tldr': structure_data['has_tldr'],
-            'has_toc': structure_data['has_toc'],
-            'word_count': structure_data['word_count'],
-            'flesch_reading_ease': structure_data['flesch_reading_ease'],
-            'entities_found': entity_data['entities_found'],
-            'entity_examples': entity_data['entity_examples'],
-            'has_author_meta': eeat_data['has_author_meta'],
-            'has_date': eeat_data['has_date'],
-            'has_author_bio': eeat_data['has_author_bio'],
-            'has_about_link': eeat_data['has_about_link'],
-            'has_contact_link': eeat_data['has_contact_link'],
-            'has_sources': eeat_data['has_sources'],
-            'recommendations': recommendations,
-            'aeo_checks': {
-                'FAQ Schema': schema_data['faq_present'],
-                'HowTo Schema': schema_data['howto_present'],
-                'Question Headings': question_data['question_headings'] >= 3,
-                'Snippet Ready': snippet_data['snippet_score'] >= 50,
-                'Has TL;DR': structure_data['has_tldr'],
-                'Good Readability': structure_data['flesch_reading_ease'] >= 60,
-                'Author Info': eeat_data['has_author_meta']
-            }
-        }
-        
-        return jsonify(flattened)
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# Main App
+st.markdown('<p class="main-header">🎯 AEO On-Page Auditor</p>', unsafe_allow_html=True)
+st.markdown("**Analyze your webpage for Answer Engine Optimization (AEO)** - optimize for AI search engines, featured snippets, and voice search.")
 
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({'status': 'healthy', 'tool': 'AEO On-Page Auditor'})
+# Input
+url = st.text_input("Enter URL to Analyze", placeholder="https://example.com/article")
 
+if st.button("🔍 Analyze", type="primary", use_container_width=True):
+    if not url:
+        st.error("Please enter a URL")
+    else:
+        with st.spinner("Analyzing webpage..."):
+            try:
+                # Fetch and analyze
+                html = fetch_page(url)
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                schema_data = analyze_schema(soup)
+                question_data = analyze_questions(soup)
+                snippet_data = analyze_snippet_optimization(soup)
+                structure_data = analyze_structure(soup)
+                entity_data = analyze_entities(soup)
+                eeat_data = analyze_eeat(soup, url)
+                
+                result = {
+                    'schema': schema_data,
+                    'questions': question_data,
+                    'snippet': snippet_data,
+                    'structure': structure_data,
+                    'entities': entity_data,
+                    'eeat': eeat_data
+                }
+                
+                score_breakdown = calculate_score_breakdown(result)
+                engine_scores = calculate_engine_scores(result)
+                recommendations = generate_prioritized_recommendations(result)
+                
+                # Display Results
+                st.success(f"✅ Analysis complete for: {url}")
+                
+                # Overall Score
+                aeo_score = score_breakdown['total']
+                score_class = "score-high" if aeo_score >= 80 else "score-medium" if aeo_score >= 60 else "score-low"
+                
+                st.markdown(f"""
+                <div class="score-card {score_class}">
+                    <h2>Overall AEO Score</h2>
+                    <h1 style="font-size: 4rem; margin: 1rem 0;">{aeo_score}</h1>
+                    <p>out of 100</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Quick Checks
+                st.subheader("✓ Quick Checks")
+                col1, col2, col3 = st.columns(3)
+                
+                checks = {
+                    'FAQ Schema': schema_data['faq_present'],
+                    'HowTo Schema': schema_data['howto_present'],
+                    'Question Headings': question_data['question_headings'] >= 3,
+                    'Snippet Ready': snippet_data['snippet_score'] >= 50,
+                    'Has TL;DR': structure_data['has_tldr'],
+                    'Good Readability': structure_data['flesch_reading_ease'] >= 60,
+                    'Author Info': eeat_data['has_author_meta']
+                }
+                
+                for i, (check, passed) in enumerate(checks.items()):
+                    col = [col1, col2, col3][i % 3]
+                    icon = "✅" if passed else "❌"
+                    col.metric(check, icon)
+                
+                # Engine Scores
+                st.subheader("🤖 Score by Answer Engine")
+                st.markdown("Different AI engines prioritize different content factors.")
+                
+                cols = st.columns(2)
+                for i, (engine, data) in enumerate(engine_scores.items()):
+                    with cols[i % 2]:
+                        score = data['score']
+                        st.metric(engine, f"{score}/100")
+                        st.caption(data['focus'])
+                        st.progress(score / 100)
+                
+                # Score Breakdown
+                st.subheader("📊 Score Breakdown by Component")
+                
+                component_names = {
+                    'schema': 'Schema Markup',
+                    'questions': 'Question Content',
+                    'snippet': 'Snippet Optimization',
+                    'structure': 'Content Structure',
+                    'eeat': 'E-E-A-T Signals',
+                    'entities': 'Entity Recognition'
+                }
+                
+                for component, values in score_breakdown['breakdown'].items():
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.write(f"**{component_names[component]}**")
+                        st.progress(values['score'] / values['max'])
+                    with col2:
+                        st.write(f"{values['score']}/{values['max']}")
+                
+                # Prioritized Recommendations
+                st.subheader("⚠️ Prioritized Recommendations")
+                
+                for rec in recommendations:
+                    priority_class = f"priority-{rec['priority'].lower()}"
+                    st.markdown(f"""
+                    <div class="{priority_class}">
+                        <strong style="color: #1F2937;">🔴 {rec['priority']}</strong> - {rec['category']} | Effort: {rec['effort']}<br/>
+                        <strong style="font-size: 1.1rem; color: #111827;">{rec['action']}</strong><br/>
+                        <em style="color: #4B5563;">{rec['impact']}</em>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # Detailed Metrics
+                st.subheader("📋 Detailed Metrics")
+                
+                tab1, tab2, tab3, tab4 = st.tabs(["Schema", "Snippet", "Structure", "E-E-A-T"])
+                
+                with tab1:
+                    st.write(f"**FAQ Schema:** {'Yes (' + str(schema_data['faq_count']) + ' items)' if schema_data['faq_present'] else 'No'}")
+                    st.write(f"**HowTo Schema:** {'Yes (' + str(schema_data['howto_count']) + ' steps)' if schema_data['howto_present'] else 'No'}")
+                    st.write(f"**Article Schema:** {'Yes' if schema_data['article_present'] else 'No'}")
+                
+                with tab2:
+                    st.write(f"**First Paragraph:** {snippet_data['first_para_words']} words")
+                    st.write(f"**Lists:** {snippet_data['lists']}")
+                    st.write(f"**Tables:** {snippet_data['tables']}")
+                    st.write(f"**Snippet Score:** {snippet_data['snippet_score']}/100")
+                
+                with tab3:
+                    st.write(f"**Word Count:** {structure_data['word_count']}")
+                    st.write(f"**Question Headings:** {question_data['question_headings']}/{question_data['total_headings']}")
+                    st.write(f"**Readability Score:** {structure_data['flesch_reading_ease']}")
+                    st.write(f"**Has TL;DR:** {'Yes' if structure_data['has_tldr'] else 'No'}")
+                    
+                    if question_data['question_heading_examples']:
+                        st.write("**Question Headings Found:**")
+                        for q in question_data['question_heading_examples']:
+                            st.write(f"- {q}")
+                
+                with tab4:
+                    st.write(f"**Author Meta:** {'Yes' if eeat_data['has_author_meta'] else 'No'}")
+                    st.write(f"**Publication Date:** {'Yes' if eeat_data['has_date'] else 'No'}")
+                    st.write(f"**Author Bio:** {'Yes' if eeat_data['has_author_bio'] else 'No'}")
+                    st.write(f"**Sources/References:** {'Yes' if eeat_data['has_sources'] else 'No'}")
+                
+            except Exception as e:
+                st.error(f"Error analyzing URL: {str(e)}")
+                st.info("Make sure the URL is accessible and returns valid HTML content.")
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
-    print(f"=== Starting Flask on port {port} ===")
-    app.run(host='0.0.0.0', port=port, debug=False)
+# Footer
+st.markdown("---")
+st.markdown("**AEO On-Page Auditor** | Optimize your content for AI search engines like ChatGPT, Claude, Gemini, and Perplexity")
