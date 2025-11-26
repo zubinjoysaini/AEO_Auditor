@@ -1,6 +1,6 @@
 import streamlit as st
 import requests
-from beautifulsoup4 import BeautifulSoup
+from bs4 import BeautifulSoup
 import re
 import json
 import textstat
@@ -608,4 +608,5 @@ if st.button("🔍 Analyze", type="primary", use_container_width=True):
 # Footer
 st.markdown("---")
 st.markdown("**AEO On-Page Auditor** | Optimize your content for AI search engines like ChatGPT, Claude, Gemini, and Perplexity")
+
 
