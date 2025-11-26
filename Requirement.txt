@@ -1,7 +1,5 @@
-Flask
-flask-cors
-requests
-beautifulsoup4
-textstat
-gunicorn
-lxml
+streamlit==1.29.0
+requests==2.31.0
+beautifulsoup4==4.12.2
+textstat==0.7.3
+
